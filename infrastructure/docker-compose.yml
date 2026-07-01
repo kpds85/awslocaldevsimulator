@@ -1,0 +1,27 @@
+services:
+  localstack:
+    container_name: localstack_main
+    image: localstack/localstack:3.8.0
+    ports:
+      - "127.0.0.1:4566:4566"
+    environment:
+      - SERVICES=s3,lambda
+      - AWS_DEFAULT_REGION=us-east-1
+    volumes:
+      # Mandatory mapping required by LocalStack v2/v3 to manage runtime execution loops
+      - "/var/run/docker.sock:/var/run/docker.sock"
+
+  mock_rds_postgres:
+    container_name: mock_rds_postgres
+    image: postgres:15
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=${MOCK_DB_NAME:-mydb}
+      - POSTGRES_USER=${MOCK_DB_USER:-myuser}
+      - POSTGRES_PASSWORD=${MOCK_DB_PASS:-mypassword}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

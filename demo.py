@@ -1,49 +1,107 @@
-import psycopg2
+import os
+import json
 import boto3
+import psycopg2
+from dotenv import load_dotenv
 
-# Create an S3 bucket using localstack and upload a sample image file
+# 1. Load the custom configurations provisioned dynamically by install.sh
+if not os.path.exists(".env"):
+    print("\033[0;31m Error: .env file not found! Please run ./install.sh first to provision resources.\033[0m")
+    exit(1)
 
-s3 = boto3.client('s3', endpoint_url='http://localhost:4566')
-bucket_name = 'my-local-bucket'
-# Create the bucket
-s3.create_bucket(Bucket=bucket_name)
-# Upload a sample image file to the bucket
-s3.upload_file('sample_image.jpg', bucket_name, 'sample_image.jpg')
+load_dotenv()
 
-# Create a PostgreSQL table using dockerized PostgreSQL and psycopg2
+BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
+DB_NAME = os.getenv("DB_NAME")
+DB_USER = os.getenv("DB_USER")
+DB_PASS = os.getenv("DB_PASS")
+LAMBDA_NAME = os.getenv("LAMBDA_FUNCTION_NAME")
+
+# LocalStack serves all simulated AWS services on port 4566
+LOCALSTACK_ENDPOINT = "http://localhost:4566"
+
+print("======================================================================")
+print(" <--- STARTING APPLICATION DEVELOPER WORKFLOW VALIDATION --->")
+print("======================================================================")
+
+
+# ---  USE CASE 1: Using the Pre-Provisioned S3 Bucket ---
+print(f" [S3 Action] Initializing client connection toward: {LOCALSTACK_ENDPOINT}")
+s3_client = boto3.client('s3', endpoint_url=LOCALSTACK_ENDPOINT)
+
+# Create a local dummy mock file to mimic a real binary image upload
+local_filename = 'sample_image.jpg'
+
+
+print(f"    Uploading '{local_filename}' to pre-existing bucket '{BUCKET_NAME}'...")
+s3_client.upload_file(local_filename, BUCKET_NAME, local_filename)
+
+
+# ---  USE CASE 2: Using the Pre-Provisioned Database ---
+print(f"\n [DB Action] Connecting to PostgreSQL on localhost:5432 (DB: {DB_NAME})...")
 conn = psycopg2.connect(
     host='localhost',
     port=5432,
-    database='mydb',
-    user='myuser',
-    password='mypassword'
+    database=DB_NAME,
+    user=DB_USER,
+    password=DB_PASS
 )
 cur = conn.cursor()
-# Create a sample table
-cur.execute('''
-    CREATE TABLE IF NOT EXISTS my_table (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(100),
-        age INT
-    )
-''')
-# Insert sample data into the table
-cur.execute('''
-    INSERT INTO my_table (name, age) VALUES
-    ('Alice', 30),
-    ('Bob', 25),
-    ('Charlie', 35)
-''')
-# Commit the changes and close the connection
+
+print("    Inserting sample developer records into 'my_table'...")
+cur.execute("INSERT INTO my_table (name, age) VALUES ('A', 30), ('B', 25), ('C', 35);")
 conn.commit()
+
+
+# ---  USE CASE 3: Synchronously Invoking the Cloud Lambda Function ---
+print(f"\n[Lambda Action] Connecting to Lambda service engine...")
+lambda_client = boto3.client('lambda', endpoint_url=LOCALSTACK_ENDPOINT, region_name='us-east-1')
+
+# Build a payload dictionary containing test parameters to forward to the function
+mock_event_payload = {
+    "action": "TEST_PING",
+    "user": DB_USER
+}
+
+print(f"    Invoking function '{LAMBDA_NAME}' and waiting for response...")
+lambda_response = lambda_client.invoke(
+    FunctionName=LAMBDA_NAME,
+    InvocationType='RequestResponse',  # Synchronous request-response execution
+    Payload=json.dumps(mock_event_payload)
+)
+
+# Extract and decode the raw binary byte stream stream payload body response 
+raw_payload_bytes = lambda_response['Payload'].read()
+decoded_response_string = raw_payload_bytes.decode('utf-8')
+lambda_result = json.loads(decoded_response_string)
+
+
+# ---  CLEANUP WORKSPACE ---
 cur.close()
 conn.close()
-print("-----------------------------Outputs-----------------------------------")
-print("\033[0;32mS3 sample bucket created and sample image uploaded.\033[0m")
-print("\033[0;32mPostgreSQL sample table created and sample data inserted.\033[0m")
+
+
+# ======================================================================
+#  FINAL RESULTS REPORT PIPELINE OUTPUTS
+# ======================================================================
+print("\n" + "="*70)
+print("\033[0;32m ALL LOCAL CLOUD COMPONENT TASKS TESTED!\033[0m")
+print("="*70)
+print("\033[0;32m[S3 Status]:  File successfully pushed to the local bucket storage system.\033[0m")
+print("\033[0;32m[DB Status]:  Row entries committed safely into the relational tables.\033[0m")
+print("\033[0;32m[Lambda Status]: Execution triggered smoothly.\033[0m")
 print("")
-print("\033[0;32m----------------------S3 Check---------------------------------------------------\033[0m")
-print("\033[0;32mOpen in browser 'http://localhost:4566/my-local-bucket/sample_image.jpg' to verify the uploaded image.\033[0m")
+
+# Parse out and show the inner structural verification report compiled by the background Lambda
+lambda_body_data = json.loads(lambda_result.get('body', '{}'))
+print(f" \033[1;34m--- Real-time Response From Inside the Lambda Container ---\033[0m")
+print(f"  Database Scan Result:  {lambda_body_data.get('database_check')}")
+print(f"  S3 Bucket Scan Result:  {lambda_body_data.get('s3_check')}")
+print(f"  Passed Event Action:   {lambda_body_data.get('triggered_by_event_action')}")
+print(f"\033[1;34m-----------------------------------------------------------\033[0m")
 print("")
-print("\033[0;32m----------------------DB Check---------------------------------------------------\033[0m")
-print("\033[0;32mRun '  docker exec -it mock_rds_postgres psql -U myuser -d mydb -c 'SELECT * FROM my_table;'  ' to verify the inserted data.\033[0m")
+print("\033[0;32m------------------- You can manually Verify by navigating as mentioned below ! -------------------\033[0m")
+print(f" S3 metadata url: http://localhost:4566/{BUCKET_NAME}/{local_filename}")
+print(f" DB query check:  docker exec -it mock_rds_postgres psql -U {DB_USER} -d {DB_NAME} -c \"SELECT * FROM my_table;\"")
+print(f" Lambda invoke:   docker exec -it localstack_main awslocal lambda invoke --function-name payload-processor-lambda     --payload '{{\"action\": \"MANUAL_TERMINAL_PING\"}}'     raw_result.json")
+print("======================================================================")
