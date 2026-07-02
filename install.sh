@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 clear
 
 # Terminal Styling Colors
@@ -12,6 +13,23 @@ echo "======================================================================"
 echo " <--- AWS LOCAL DEV SIMULATOR SETUP  ---> " 
 echo "======================================================================"
 echo -e "${GREEN}INFO : You need to provide sudo password to remove the cached build files when prompted during installation !!.${NC}"
+echo "======================================================================"
+echo -e "Checking for Docker and Docker Compose installation..."
+if ! command -v docker &> /dev/null; then
+    echo -e "${RED}Error: Docker is not installed. Please install Docker and try again.${NC}"
+    exit 1
+fi
+
+if ! docker info > /dev/null 2>&1; then
+    echo -e "${RED}Error: Docker is installed but the daemon is not running. Please start Docker and try again.${NC}"
+    exit 1
+fi
+
+if ! docker compose version > /dev/null 2>&1; then
+    echo -e "${RED}Error: Docker Compose is not available. Please install Docker Compose and try again.${NC}"
+    exit 1
+fi
+
 # 1. Capture user customization configurations
 read -p "Enter S3 Bucket Name [my-local-bucket]: " BUCKET_NAME
 BUCKET_NAME=${BUCKET_NAME:-my-local-bucket}
@@ -85,7 +103,6 @@ fi
 
 sudo rm -rf "$BUILD_DIR"
 
-echo -e "${YELLOW} 🚀 Deploying Lambda Function into LocalStack...${NC}"
 
 # 6. Create the Lambda Function by passing the packaged binary data stream over stdin [1]
 if ! docker exec -i localstack_main awslocal lambda create-function \
