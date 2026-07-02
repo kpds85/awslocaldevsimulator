@@ -1,7 +1,9 @@
 import os
 import json
+import time
 import boto3
 import psycopg2
+from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 
 # 1. Load the custom configurations provisioned dynamically by install.sh
@@ -19,6 +21,33 @@ LAMBDA_NAME = os.getenv("LAMBDA_FUNCTION_NAME")
 
 # LocalStack serves all simulated AWS services on port 4566
 LOCALSTACK_ENDPOINT = "http://localhost:4566"
+
+
+def wait_for_lambda_ready(lambda_client, function_name, timeout_seconds=60, interval_seconds=2):
+    print(f"    Waiting for Lambda function '{function_name}' to become available...")
+    deadline = time.time() + timeout_seconds
+    last_error = None
+
+    while time.time() < deadline:
+        try:
+            lambda_client.get_function(FunctionName=function_name)
+            print(f"    Lambda function '{function_name}' is ready.")
+            return
+        except ClientError as exc:
+            last_error = exc
+            error_code = exc.response.get("Error", {}).get("Code", "")
+            if error_code in {"ResourceNotFoundException", "FunctionNotFoundException", "NotFoundException"}:
+                time.sleep(interval_seconds)
+                continue
+            raise
+        except Exception as exc:
+            last_error = exc
+            time.sleep(interval_seconds)
+
+    raise RuntimeError(
+        f"Lambda function '{function_name}' did not become ready within {timeout_seconds} seconds: {last_error}"
+    )
+
 
 print("======================================================================")
 print(" <--- STARTING APPLICATION DEVELOPER WORKFLOW VALIDATION --->")
@@ -64,12 +93,24 @@ mock_event_payload = {
     "user": DB_USER
 }
 
+wait_for_lambda_ready(lambda_client, LAMBDA_NAME)
+
 print(f"    Invoking function '{LAMBDA_NAME}' and waiting for response...")
-lambda_response = lambda_client.invoke(
-    FunctionName=LAMBDA_NAME,
-    InvocationType='RequestResponse',  # Synchronous request-response execution
-    Payload=json.dumps(mock_event_payload)
-)
+for attempt in range(1, 6):
+    try:
+        lambda_response = lambda_client.invoke(
+            FunctionName=LAMBDA_NAME,
+            InvocationType='RequestResponse',  # Synchronous request-response execution
+            Payload=json.dumps(mock_event_payload)
+        )
+        break
+    except ClientError as exc:
+        error_code = exc.response.get("Error", {}).get("Code", "")
+        if error_code in {"ResourceNotFoundException", "FunctionNotFoundException", "NotFoundException"} and attempt < 5:
+            print(f"    Lambda function was not ready yet; retrying ({attempt}/5)...")
+            time.sleep(2)
+            continue
+        raise
 
 # Extract and decode the raw binary byte stream stream payload body response 
 raw_payload_bytes = lambda_response['Payload'].read()

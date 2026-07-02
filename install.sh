@@ -53,6 +53,10 @@ export MOCK_DB_USER=$DB_USER
 export MOCK_DB_PASS=$DB_PASS
 
 # 2. Spin up core container architectures
+# Reset existing PostgreSQL state so the newly provided credentials are applied on a fresh init.
+echo -e "${YELLOW} Resetting any previous PostgreSQL container state so the new credentials take effect...${NC}"
+docker compose -f infrastructure/docker-compose.yml down --volumes --remove-orphans > /dev/null 2>&1 || true
+
 echo -e "${GREEN}\n Starting Infrastructure Containers (LocalStack & PostgreSQL)...${NC}"
 docker compose -f infrastructure/docker-compose.yml up -d
 
@@ -119,6 +123,12 @@ if ! docker exec -i localstack_main awslocal lambda create-function \
     exit 1
 fi
 
+# Wait until the function is actually discoverable in LocalStack before moving on.
+echo -e "${YELLOW} Waiting for Lambda function to become discoverable...${NC}"
+until docker exec localstack_main awslocal lambda get-function --function-name "$LAMBDA_NAME" > /dev/null 2>&1; do
+    sleep 1
+done
+
 # Wipe out deployment asset cleanly
 sudo rm -f lambda_deployment.zip
 
@@ -136,9 +146,4 @@ echo -e "${GREEN} ENVIRONMENT IS PROVISIONED AND READY FOR USE!${NC}"
 echo "======================================================================"
 echo -e "${YELLOW}To test the environment, run:${NC}"
 echo -e "  ${BLUE}python3 demo.py${NC}"
-echo ""
-echo " Manual Verification Command Verification Traces:"
-echo -e "   DB: ${BLUE}docker exec -it mock_rds_postgres psql -U $DB_USER -d $DB_NAME -c 'SELECT * FROM my_table;'${NC}"
-echo -e "   S3: ${BLUE}docker exec -it localstack_main awslocal s3 ls s3://$BUCKET_NAME/${NC}"
-echo -e "   Lambda: ${BLUE}docker exec -it localstack_main awslocal lambda invoke --function-name $LAMBDA_NAME --payload '{\"action\": \"MANUAL_TERMINAL_PING\"}' raw_result.json${NC}"
 echo "======================================================================"
