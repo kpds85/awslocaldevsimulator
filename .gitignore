@@ -1,5 +1,2 @@
 #ignore localstack folder
 localstack/
-.venv/
-infrastructure/.localstack_lambda_cache/
-infrastructure/.lambda_libs/
