@@ -48,7 +48,8 @@ conn = psycopg2.connect(
 )
 cur = conn.cursor()
 
-print("    Inserting sample developer records into 'my_table'...")
+print("Create and Insert sample developer records into a sammple table named 'my_table'...")
+cur.execute("CREATE TABLE IF NOT EXISTS my_table (id SERIAL PRIMARY KEY, name VARCHAR(100), age INT);")
 cur.execute("INSERT INTO my_table (name, age) VALUES ('A', 30), ('B', 25), ('C', 35);")
 conn.commit()
 

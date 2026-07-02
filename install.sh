@@ -11,7 +11,7 @@ NC='\033[0m'
 echo "======================================================================"
 echo " <--- AWS LOCAL DEV SIMULATOR SETUP  ---> " 
 echo "======================================================================"
-
+echo -e "${GREEN}INFO : You need to provide sudo password to remove the cached build files when prompted during installation !!.${NC}"
 # 1. Capture user customization configurations
 read -p "Enter S3 Bucket Name [my-local-bucket]: " BUCKET_NAME
 BUCKET_NAME=${BUCKET_NAME:-my-local-bucket}
@@ -39,7 +39,7 @@ echo -e "${GREEN}\n Starting Infrastructure Containers (LocalStack & PostgreSQL)
 docker compose -f infrastructure/docker-compose.yml up -d
 
 # 3. Rest and wait for basic engines readiness healthchecks
-echo -e "${YELLOW} Waiting for PostgreSQL database engine...${NC}"
+echo -e "${YELLOW} Provisioning PostgreSQL Database instance and Database engine...${NC}"
 until docker exec mock_rds_postgres pg_isready -U "$DB_USER" -d "$DB_NAME" > /dev/null 2>&1; do
   sleep 1
 done
@@ -55,16 +55,10 @@ echo -e "${GREEN}\n Provisioning Cloud Resources via Mock IaC...${NC}"
 echo -e "${YELLOW} Provisioning S3 Bucket...${NC}"
 docker exec localstack_main awslocal s3 mb "s3://$BUCKET_NAME" > /dev/null
 
-echo -e "${YELLOW} Provisioning PostgreSQL Table...${NC}"
-docker exec mock_rds_postgres psql -U "$DB_USER" -d "$DB_NAME" -c "
-CREATE TABLE IF NOT EXISTS my_table (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(100),
-    age INT
-);" > /dev/null
+echo -e "${YELLOW} Provisioning Lambda Function...${NC}"
 
 # 5. Build and Package the Lambda Function Bundle
-echo -e "${YELLOW} ⚙️  Packaging cloud dependencies archive from requirements.txt...${NC}"
+echo -e "${YELLOW} Packaging cloud dependencies archive from requirements.txt...${NC}"
 BUILD_DIR=".build_staging"
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
@@ -81,14 +75,14 @@ docker run --rm \
 if [ -f src/lambdas/payload_processor/index.py ]; then
     cp src/lambdas/payload_processor/index.py "$BUILD_DIR/index.py"
 else
-    echo -e "${RED}❌ Error: src/lambdas/payload_processor/index.py not found!${NC}"
+    echo -e "${RED} Error: src/lambdas/payload_processor/index.py not found!${NC}"
     sudo rm -rf "$BUILD_DIR"
     exit 1
 fi
 
 # Compress the entire staging layout workspace into a standard deployment target zip file
 (cd "$BUILD_DIR" && zip -q -r ../lambda_deployment.zip .)
-echo -e "${GREEN}You need to provide sudo permissions to remove the build staging directory.${NC}"
+
 sudo rm -rf "$BUILD_DIR"
 
 echo -e "${YELLOW} 🚀 Deploying Lambda Function into LocalStack...${NC}"
@@ -103,7 +97,7 @@ if ! docker exec -i localstack_main awslocal lambda create-function \
     --environment "Variables={DB_NAME=$DB_NAME,DB_USER=$DB_USER,DB_PASS=$DB_PASS,S3_BUCKET_NAME=$BUCKET_NAME}" \
     < lambda_deployment.zip > /dev/null 2>&1; then
     
-    echo -e "${RED}❌ Failed to provision Lambda. Double-check your path parameters or properties.${NC}"
+    echo -e "${RED} Failed to provision Lambda, check logs of container localstack_main.${NC}"
     sudo rm -f lambda_deployment.zip
     exit 1
 fi
